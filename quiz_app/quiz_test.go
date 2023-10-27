@@ -6,6 +6,7 @@ import (
 	"gotest.tools/assert"
 )
 
+// template for running test
 func TestAdd(t *testing.T) {
 	sum := Add(1, 2)
 	expected := 3
