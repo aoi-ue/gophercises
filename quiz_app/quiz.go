@@ -57,6 +57,8 @@ func main() {
 	ticker := time.NewTicker(time.Second * time.Duration(timeLimit))
 	done := make(chan bool)
 
+	WaitForStart()
+
 	// Answer questions
 	go func() {
 		for i, question := range questions {
@@ -103,6 +105,12 @@ func initFile() (string, int) {
 	fmt.Printf("Reading file: %s\n", *filePath)
 
 	return *filePath, *timeLimit
+}
+
+// WaitForStart makes the program wait for a user to press Enter button
+func WaitForStart() {
+	fmt.Print("Press 'Enter' to start the quiz.")
+	bufio.NewReader(os.Stdin).ReadBytes('\n')
 }
 
 func Add(a, b int) int {
