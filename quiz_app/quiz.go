@@ -1,90 +1,165 @@
+//todo: file and time prompt
+//todo: styling issue on alignment
+// init > model > update > view > helper func
+
 package main
 
 import (
+	"encoding/csv"
 	"fmt"
 	"log"
 	"os"
+	"time"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
-// main func
-func main() {
-	p := tea.NewProgram(initialModel())
-
-	if _, err := p.Run(); err != nil {
-		log.Fatal(err)
-		os.Exit(1)
-	}
-
-}
-
-// model as state: question to prompt, correctcount to keep track, timer to end
 type model struct {
-	textInput textinput.Model
-	// questions []question
-	correctcount int
-	timer        int
+	questions    []question
+	currentIndex int
+	correctCount int
+	textInput    textinput.Model
+	spinner      spinner.Model
+	timeLimit    time.Duration
+	quizEnded    bool 
 	err          error
 }
 
-// type question struct {
-// 	Question string
-// 	Answer string
-// }
+type question struct {
+	Question string
+	Answer   string
+}
 
-// initial state with bubbletea: to read textinput,
-func initialModel() model {
-	ti := textinput.New()
-	ti.Placeholder = "Enter Answer Here"
-	ti.Focus()
-	ti.CharLimit = 156
-	ti.Width = 20
+func main() {
+	m, err := initialModel()
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	return model{
-		textInput: ti,
-		// questions []question
-		correctcount: 0,
-		// todo: have to take timer from cobra's flag
-		timer: 30,
-		err:   nil,
+	p := tea.NewProgram(m)
+	quitMsg := time.After(3 * time.Second)
+	go func() {
+		<-quitMsg
+		m.quizEnded = true 
+		p.Quit()
+	}()
+
+	_, err = p.Run()
+	if err != nil {
+		log.Fatal(err)
 	}
 }
 
-// init actionable: blink and display
-func (m model) Init() tea.Cmd {
-	return textinput.Blink
+func initialModel() (model, error) {
+	filePath := "problems.csv"
+	timeLimit := 30 * time.Second
+
+	questions, err := readCSV(filePath)
+	if err != nil {
+		return model{}, err
+	}
+
+	ti := textinput.New()
+	ti.Placeholder = "Enter your answer"
+	ti.Focus()
+	ti.CharLimit = 100
+	ti.Width = 30
+
+	s := spinner.New()
+	s.Spinner = spinner.Dot
+	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+
+	return model{
+		questions:    questions,
+		currentIndex: 0,
+		correctCount: 0,
+		textInput:    ti,
+		spinner:      s,
+		timeLimit:    timeLimit,
+		err:          nil,
+	}, nil
 }
 
-// update: update the correctcount, readline to trigger view render
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmd tea.Cmd
+func (m model) Init() tea.Cmd {
+	return m.spinner.Tick
+}
 
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "esc":
 			return m, tea.Quit
-		case "enter", " ":
-			// todo: evaluate if input is same as column[1]
-			return m, textinput.Blink
+		case "enter":
+			if m.textInput.Value() == m.questions[m.currentIndex].Answer {
+				m.correctCount++
+			}
+			m.currentIndex++
+			if m.currentIndex >= len(m.questions) {
+				return m, tea.Quit
+			}
+			m.textInput.Reset()
+			return m, nil
+		default:
+			var cmd tea.Cmd
+			m.textInput, cmd = m.textInput.Update(msg)
+			return m, cmd
 		}
+
+	default:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
 	}
-
-	return m, cmd
-
 }
 
-// view: simple view of a quiz, render everytime for new readLine
+// todo: view model not showing ops messages 
 func (m model) View() string {
+	if m.quizEnded {
+		return "Time's up!"
+	}
+	
+	if len(m.questions) == 0 {
+		return "No questions found."
+	}
+
+	if m.currentIndex >= len(m.questions) {
+		return fmt.Sprintf("Quiz completed! Your score: %d/%d", m.correctCount, len(m.questions))
+	}
+
+	question := m.questions[m.currentIndex]
 	return fmt.Sprintf(
-		"Question Goes here\n\n%s\n\n%s",
+		"\n   %s\n\n%s\n\n   Correct: %d\n\n   (press Enter to answer)\n",
+		question.Question,
 		m.textInput.View(),
-		"(ctrl c or esc to quit)",
+		m.correctCount,
 	)
 }
 
-// lipgloss: for styling
+func readCSV(filename string) ([]question, error) {
+	file, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
 
-// readCSV: purely to read CSV
+	reader := csv.NewReader(file)
+	records, err := reader.ReadAll()
+	if err != nil {
+		return nil, err
+	}
+
+	questions := make([]question, len(records))
+	for i, record := range records {
+		questions[i] = question{
+			Question: record[0],
+			Answer:   record[1],
+		}
+	}
+
+	return questions, nil
+}
+
